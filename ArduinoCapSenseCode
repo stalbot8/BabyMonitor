@@ -1,0 +1,52 @@
+#include <CapacitiveSensor.h>
+
+#define ledpin A1
+
+CapacitiveSensor   cs_4_2 = CapacitiveSensor(4, 2);       // 10M resistor between pins 4 & 2, pin 2 is sensor pin, add a wire and or foil if desired
+int led2 = 7;
+long old_val = 0.0;
+int count = 0;
+int upperBound = 200;
+int lowerBound = 80;
+int numVals = 10;
+float ledreading;
+long sumVals = 0.0;
+// the setup function runs once when you press reset or power the board
+void setup() {
+  // initialize digital pin LED_BUILTIN as an output.
+  cs_4_2.set_CS_AutocaL_Millis(0xFFFFFFFF);     // turn off autocalibrate on channel 1 - just as an example
+  pinMode(led2, OUTPUT);
+  Serial.begin(9600);
+}
+
+// the loop function runs over and over again forever
+void loop() {
+
+  ledreading = analogRead(ledpin) * 5.0 / 1023.0;
+//  Serial.println(ledreading);
+
+  long total1 =  cs_4_2.capacitiveSensor(30);
+
+  
+  for (int i = 0; i < numVals; i++) {
+    total1 =  cs_4_2.capacitiveSensor(30);
+    sumVals += total1;
+  }
+  long avgVal = sumVals / (long)numVals;
+  
+  Serial.println(avgVal);
+  if (avgVal >= old_val + 35) {
+    digitalWrite(led2, LOW);
+  }
+  if (avgVal <= old_val - 35){
+    digitalWrite(led2, HIGH);
+  }
+  if (count < 5) {
+    count++;
+  } else {
+    old_val = avgVal;
+    count = 0;
+  }
+  sumVals = 0;
+//      Serial.print(millis() - start);        // check on performance in milliseconds
+}
