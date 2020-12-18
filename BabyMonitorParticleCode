@@ -1,0 +1,265 @@
+// This #include statement was automatically added by the Particle IDE.
+#include <SparkFunRHT03.h>
+
+#include "SparkFunMMA8452Q.h"
+#include <math.h>
+#include <stdbool.h>
+
+#define fsrpin A0
+#define ledpin A1
+#define PRINT_RATE 1500 // Time in ms to delay between prints.
+
+// temperature variables
+/////////////////////
+// Pin Definitions //
+/////////////////////
+const int RHT03_DATA_PIN = D3; // RHT03 data pin
+const int LED_PIN = D7; // LED to show when the sensor's are being read
+int led0 = 4;
+bool temp = false;
+
+///////////////////////////
+// RHT03 Object Creation //
+///////////////////////////
+RHT03 rht; // This creates a RTH03 object, which we'll use to interact with the sensor
+
+float minimumTempF = 9941;
+float maximumTempF = 0;
+int update = 0;
+
+
+// fsr variables
+float fsrreading;
+int led1 = D6;
+bool fsr = false;
+
+// capacitive sensing variables
+float ledreading;
+bool cap = false;
+
+
+// acceleration variables
+// Create an MMA8452Q object, used throughout the rest of the sketch.
+MMA8452Q accel; // Default constructor, SA0 pin is HIGH
+int led3 = D5;
+float accel_mag_old = 0.0;
+float accel_mag_diff = 0.0;
+int count = 0;
+bool first_count = false;
+bool acc = false;
+// The above works if the MMA8452Q's address select pin (SA0) is high.
+// If SA0 is low (if the jumper on the back of the SparkFun MMA8452Q breakout
+// board is closed), initialize it like this:
+// MMA8452Q accel(MMA8452Q_ADD_SA0_);
+
+// warning variables
+int warning = 0;;
+int led4 = D2;
+int trigger_count = 0;
+bool first_trigger = true;
+
+void setup() 
+{
+    Serial.begin(9600);
+    // Using the 'rht' object created in the global section, we'll begin by calling
+    // its member function `begin`.
+    // The parameter in this function is the DIGITAL PIN we're using to communicate
+    // with the sensor.
+    rht.begin(RHT03_DATA_PIN);  // Initialize the RHT03 sensor
+	// Initialize the accelerometer with begin():
+	// begin can take two parameters: full-scale range, and output data rate (ODR).
+	// Full-scale range can be: SCALE_2G, SCALE_4G, or SCALE_8G (2, 4, or 8g)
+	// ODR can be: ODR_800, ODR_400, ODR_200, ODR_100, ODR_50, ODR_12, ODR_6 or ODR_1
+	pinMode(led0, OUTPUT);
+	pinMode(led4, OUTPUT);
+	pinMode(led1, OUTPUT);
+	pinMode(led3, OUTPUT);
+	pinMode(LED_PIN, OUTPUT); // Set the LED pin as an OUTPUT
+    digitalWrite(LED_PIN, LOW); // Initially set the LED pin low -- turn the LED off.
+    accel.begin(SCALE_2G, ODR_1); // Set up accel with +/-2g range, and slowest (1Hz) ODR
+}
+
+void loop() 
+{   
+    bool temp_check = run_temp();
+    bool fsr_check = run_fsr();
+    bool cap_check = run_cap();
+    bool accel_check = run_accel();
+    if (temp_check && fsr_check) {
+        warning++;
+    }
+    if (temp_check && cap_check) {
+        warning++;
+    }
+    if (temp_check && accel_check) {
+        warning++;
+    }
+    print_states(temp_check, fsr_check, cap_check, accel_check, warning);
+    if (warning == 1 && (trigger_count > 5 || first_trigger)) {
+        Spark.publish("babyMonitorState","Danger_Level_1",60,PRIVATE);
+        blink_led(led4);
+        trigger_count++;
+        first_trigger = false;
+    } else if (warning == 2 && (trigger_count > 5 || first_trigger)) {
+        Spark.publish("babyMonitorState","Danger_Level_2",60,PRIVATE);
+        blink_led(led4);
+        trigger_count++;
+        first_trigger = false;
+    } else if (warning == 3 && (trigger_count > 5 || first_trigger)) {
+        Spark.publish("babyMonitorState","Danger_Level_3",60,PRIVATE);
+        blink_led(led4);
+        trigger_count++;
+        first_trigger = false;
+    } else {
+        // do nothing
+    }
+    warning = 0;
+}
+
+void blink_led(int led) {
+    for (int i = 0; i < 10; i++) {
+        digitalWrite(led, HIGH);   // turn the LED on (HIGH is the voltage level)
+        delay(250);                       // wait for a second
+        digitalWrite(led, LOW);    // turn the LED off by making the voltage LOW
+        delay(250);                       // wait for a second
+    }
+}
+
+void print_states(bool temp_check, bool fsr_check, bool cap_check, bool accel_check, int warning) {
+    Serial.print("temp state: ");
+    Serial.println(temp_check);
+    Serial.print("fsr state: ");
+    Serial.println(fsr_check);
+    Serial.print("cap state: ");
+    Serial.println(cap_check);
+    Serial.print("accel state: ");
+    Serial.println(accel_check);
+    Serial.print("warning count: ");
+    Serial.println(warning);
+    Serial.println();
+}
+
+bool run_temp(void) {
+    // digitalWrite(LED_PIN, HIGH); // Turn the LED on -- it'll blink whenever the sensor is being read.
+    float tempF;
+    int update = rht.update();
+    if (update == 1) // If the update succeeded, print out the new readings:
+    {
+        tempF = rht.tempF();
+        // Do some math to calculate the max/min tempF
+        if (tempF > maximumTempF) maximumTempF = tempF;
+        if (tempF < minimumTempF) minimumTempF = tempF;
+    } else {
+         delay(RHT_READ_INTERVAL_MS); // The RHT03 needs about 1s between read attempts
+    }
+    // print_temp_vals(update, tempF, minimumTempF, maximumTempF);
+    
+    // digitalWrite(LED_PIN, LOW); // Turn the LED off
+    
+    if (tempF >= 75.0) {
+        digitalWrite(led0, HIGH);
+        temp = true;
+    } else {
+        digitalWrite(led0, LOW);
+        temp = false;
+    }
+    
+    delay(PRINT_RATE); // delay for 1s, printing too much will make the output very hard to read.
+    return temp;
+}
+
+void print_temp_vals(int update, float tempF, float minimumTempF, float maximumTempF) {
+    if (update == 1) // If the update succeeded, print out the new readings:
+    {
+        // Print the temperature in °F:
+        // Example printout: "Temp: 76.1 °F (74.3/76.1) (min/max)"
+        Serial.print("Temp: "); // Print "Temp: "
+        Serial.print(tempF, 1); // Print the tempF variable -- 1 decimal point
+        Serial.print(' ');      // Print a space
+        Serial.write(248);      // Print ASCII value 248 (the ° symbol)
+        Serial.print("F (");    // Print "F ("
+        Serial.print(minimumTempF, 1); // Print minimum temperature -- 1 decimal point
+        Serial.print('/');      // Print a '/'
+        Serial.print(maximumTempF, 1); // Print maximum temp -- 1 decimal point
+        Serial.println(") (min/max)"); // Finsh the line by printing ") (min/max)"
+        
+        Serial.println(); // Print a blank line:
+    }
+    else // If the update failed, give the sensor time to reset:
+    {
+        Serial.println("Error reading from the RHT03."); // Print an error message
+        Serial.println(); // Print a blank line
+    }
+}
+
+bool run_fsr(void) {
+    fsrreading = analogRead(fsrpin);
+  
+    float voltage = fsrreading * 5.0 / 1023.0;
+    voltage /= 4.0;
+    Serial.println(voltage);
+    
+    if (voltage > 2.0) {
+      digitalWrite(led1, HIGH);
+      fsr = true;
+    } else {
+      digitalWrite(led1, LOW);
+      fsr = false;
+    }
+    return fsr;
+}
+
+bool run_cap(void) {
+    ledreading = analogRead(ledpin);
+    
+    float ledVal = ledreading * 5.0 / 1023.0;
+    ledVal /= 4.0;
+    // Serial.println(ledVal);
+    
+    if (ledVal >= 3.0) {
+        cap = true;
+    } else {
+        cap = false;
+    }
+    return cap;
+}
+
+bool run_accel(void) {
+    if (accel.available()) {
+        
+        accel.read();
+        float accel_mag = sqrt(pow(accel.cx, 2.0) + pow(accel.cy, 2.0) + pow(accel.cz, 2.0));
+        
+        // print_accel_vals(accel_mag_old, accel_mag, accel_mag_diff, count);
+        
+        accel_mag_diff = fabs(accel_mag - accel_mag_old);
+        if (accel_mag_diff >= 0.01 && first_count) {
+            digitalWrite(led3, HIGH);
+            acc = true;
+            count = 0;
+        } else {
+            count++;
+            first_count++;
+        }
+        if (count == 5) {
+            digitalWrite(led3, LOW);
+            count = 0;
+            first_count = true;
+            acc = false;
+        }
+        accel_mag_old = accel_mag;
+    }
+    return acc;
+}
+
+void print_accel_vals(float accel_mag_old, float accel_mag, float accel_mag_diff, int count) {
+    Serial.print(accel_mag_old, 4);
+    Serial.println();
+    Serial.print(accel_mag, 4);
+    Serial.println();
+    Serial.print(accel_mag_diff, 4);
+    Serial.println();
+    Serial.println(count);
+    Serial.println();
+    Serial.println();
+}
